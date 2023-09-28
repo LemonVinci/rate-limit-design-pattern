@@ -16,7 +16,7 @@ func StartApp() {
 
 	router := gin.Default()
 	router.GET("/ping", controllers.Ping)
-	router.POST("/notifications", controllers.SendNotification)
-	router.POST("/burst_notification", controllers.BurstNotification)
+	router.POST("/notification", controllers.SendNotification)
+	router.POST("/burst_notifications", controllers.BurstNotification)
 	router.Run(domain)
 }

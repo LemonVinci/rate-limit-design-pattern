@@ -2,64 +2,57 @@ package notification
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
-var mailTypes = map[string]MailType{
-	"news":   MailType{1, 1000 * time.Millisecond},
-	"update": MailType{2, 2000 * time.Millisecond},
-	"":       MailType{3, 2000 * time.Millisecond},
-}
-
-type EmailSender struct {
-	// Map to store scheduled rate limiters for each user
-	rateLimiters map[string]*rate.Sometimes
-	mailTypes    map[string]*MailType
-}
-
-type MailType struct {
-	// Struct to store rate limiters rules for each type
-	maxCount int16
-	interval time.Duration
+var mailTypes = map[string]MailTypeLimiter{
+	"marketing": {1, 60 * time.Second},
+	"status":    {3, 20 * time.Second},
+	"news":      {2, 10 * time.Second},
+	"":          {1, 60 * time.Second},
 }
 
 func NewEmailSender() *EmailSender {
 	return &EmailSender{
 		rateLimiters: make(map[string]*rate.Sometimes),
-		mailTypes:    make(map[string]*MailType),
+		mailTypes:    make(map[string]*MailTypeLimiter),
 	}
 }
 
-func (es *EmailSender) SendEmail(userId string, mailType string, notificationId int) {
-	var hasBeenSended bool
+func (es *EmailSender) SendEmail(userId string, mailType string, notificationId int) string {
+	var sentMessage string
 
-	// Get or create a scheduled rate limiter for the user
-	limiter := es.getRateLimiter(userId, mailType)
+	limiter := es.getSingletonRateLimiter(userId, mailType)
 
-	// Try to send an email
 	limiter.Do(func() {
-		fmt.Printf("%s email %d sent to %s\n", mailType, notificationId, userId)
-		hasBeenSended = true
+		fmt.Printf("200 - %s email %d sent to %s\n", mailType, notificationId, userId)
+		sentMessage = fmt.Sprintf("200 - %s email %d sent to %s", mailType, notificationId, userId)
 	})
 
-	if !hasBeenSended {
-		fmt.Printf("429 - Rate limit exceeded for %s. Waiting to send more %s emails...\n", mailType, userId)
+	if sentMessage == "" {
+		fmt.Printf("429 - %s email %d exceeded ratelimit for user %s.\n", mailType, notificationId, userId)
+		return fmt.Sprintf("429 - %s email %d exceeded ratelimit for user %s.", mailType, notificationId, userId)
 	}
 
+	return sentMessage
 }
 
-func (es *EmailSender) getRateLimiter(userId string, mailType string) *rate.Sometimes {
-	// Check if a scheduled rate limiter exists for the hash userMail + mailType
-	if limiter, ok := es.rateLimiters[userId+mailType]; ok {
+func (es *EmailSender) getSingletonRateLimiter(userId string, mailType string) *rate.Sometimes {
+	// Create a hash with userMail + mailType
+	hashUserIdMailType := strings.ToLower(userId) + strings.ToLower(mailType)
+
+	// Check if a scheduled rate limiter exists for the hash
+	if limiter, ok := es.rateLimiters[hashUserIdMailType]; ok {
 		return limiter
 	}
 
-	limiter := rate.Sometimes{First: int(mailTypes[mailType].maxCount), Interval: mailTypes[mailType].interval}
+	newLimiter := rate.Sometimes{First: int(mailTypes[mailType].maxCount), Interval: mailTypes[mailType].interval}
 
-	// Store the rate limiter in the map for the user
-	es.rateLimiters[userId+mailType] = &limiter
+	// Store the rate limiter in the map for the user+type
+	es.rateLimiters[hashUserIdMailType] = &newLimiter
 
-	return &limiter
+	return &newLimiter
 }
